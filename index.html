@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bundle Check</title>
+<meta name="description" content="Paste a Solana CA. See who bought in the launch block before you become exit liquidity.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a health-department inspection card. Big posted letter grade, violations list, evidence table. */
+:root {
+  --paper: #f6f4ec;
+  --card: #ffffff;
+  --ink: #1b1d24;
+  --muted: #5d6170;
+  --line: #d9d6ca;
+  --blue: #1f4fd1;      /* grade A, like the window sticker */
+  --green: #1d8a4e;
+  --amber: #c98a00;
+  --red: #d2311f;
+  --tape: #ffd21f;
+  --tape-ink: #1b1d24;
+  --display: "Anton", "Impact", "Arial Narrow", sans-serif;
+  --body: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14151a; --card: #1d1f26; --ink: #eceae2; --muted: #a1a3ad; --line: #33353f;
+    --blue: #6b93ff; --green: #3fc07a; --amber: #f0b429; --red: #ff6450;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14151a; --card: #1d1f26; --ink: #eceae2; --muted: #a1a3ad; --line: #33353f;
+  --blue: #6b93ff; --green: #3fc07a; --amber: #f0b429; --red: #ff6450;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 16px/1.5 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+.tape {
+  margin-left: calc(-1 * max(16px, env(safe-area-inset-left, 0px)));
+  margin-right: calc(-1 * max(16px, env(safe-area-inset-right, 0px)));
+  background: repeating-linear-gradient(-45deg, var(--tape) 0 22px, var(--tape-ink) 22px 44px);
+  height: 14px;
+}
+.wrap { max-width: 860px; margin: 0 auto; display: grid; gap: 28px; padding-top: 36px; }
+header { display: grid; gap: 10px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+h1 { font: 400 clamp(48px, 11vw, 104px)/.9 var(--display); margin: 0; letter-spacing: .01em; text-transform: uppercase; text-wrap: balance; }
+h1 span { color: var(--red); }
+.lede { margin: 0; max-width: 58ch; color: var(--muted); font-size: 18px; }
+
+form { display: flex; gap: 10px; flex-wrap: wrap; }
+input[type=text] {
+  flex: 1 1 320px; min-width: 0;
+  font: 500 15px var(--mono); color: var(--ink); background: var(--card);
+  border: 2px solid var(--ink); border-radius: 6px; padding: 14px 14px;
+}
+input[type=text]:focus-visible, button:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+button {
+  font: 800 15px var(--body); letter-spacing: .04em; text-transform: uppercase;
+  background: var(--ink); color: var(--paper); border: 2px solid var(--ink); border-radius: 6px;
+  padding: 14px 22px; cursor: pointer;
+}
+button:hover { background: var(--red); border-color: var(--red); color: #fff; }
+button:disabled { opacity: .5; cursor: wait; }
+.under { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 14px; color: var(--muted); }
+.linkish { background: none; border: 0; padding: 0; color: var(--blue); font: 600 14px var(--body); text-transform: none; letter-spacing: 0; text-decoration: underline; cursor: pointer; }
+.linkish:hover { background: none; color: var(--red); }
+details { font-size: 14px; color: var(--muted); }
+details summary { cursor: pointer; }
+details .rpcrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+details input { flex: 1 1 260px; font: 13px var(--mono); padding: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 4px; min-width: 0; }
+
+.status { font: 13px var(--mono); color: var(--muted); min-height: 1.5em; }
+.status.err { color: var(--red); }
+
+/* Report card */
+.report { background: var(--card); border: 2px solid var(--ink); border-radius: 10px; overflow: hidden; }
+.report-top { display: grid; grid-template-columns: auto 1fr; gap: 24px; padding: 24px; align-items: center; }
+.grade {
+  width: 132px; aspect-ratio: 1; max-width: 100%; border-radius: 50%;
+  border: 6px solid currentColor; display: grid; place-items: center; position: relative;
+  font: 400 88px/1 var(--display);
+}
+.grade small { position: absolute; bottom: 14px; font: 600 10px var(--mono); letter-spacing: .12em; }
+.g-A { color: var(--blue); } .g-B { color: var(--green); } .g-C { color: var(--amber); } .g-F { color: var(--red); }
+.verdict { display: grid; gap: 6px; min-width: 0; }
+.tok { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.tok img { width: 32px; height: 32px; border-radius: 50%; background: var(--line); }
+.tok b { font-weight: 800; font-size: 18px; }
+.tok code { font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.verdict h2 { font: 400 clamp(32px, 6vw, 48px)/1 var(--display); text-transform: uppercase; margin: 4px 0 0; }
+.verdict p { margin: 0; max-width: 60ch; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 2px solid var(--ink); }
+.stat { padding: 14px 18px; border-right: 1px solid var(--line); display: grid; gap: 2px; }
+.stat:last-child { border-right: 0; }
+.stat span { font: 600 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat b { font: 400 28px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.violations { border-top: 2px solid var(--ink); padding: 18px 24px; display: grid; gap: 10px; }
+.violations h3, .evidence h3 { font: 600 12px var(--mono); letter-spacing: .14em; text-transform: uppercase; margin: 0; color: var(--muted); }
+.v { display: grid; grid-template-columns: 82px 1fr; gap: 12px; align-items: baseline; }
+.v code { font: 600 12px var(--mono); padding: 2px 6px; border-radius: 4px; text-align: center; }
+.v.bad code { background: var(--red); color: #fff; }
+.v.warn code { background: var(--amber); color: #1b1d24; }
+.v.ok code { background: var(--green); color: #fff; }
+.evidence { border-top: 2px solid var(--ink); padding: 18px 24px; display: grid; gap: 10px; }
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font: 13px var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-weight: 600; color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+td a { color: var(--blue); }
+.pill { font-size: 11px; padding: 1px 6px; border-radius: 99px; border: 1px solid currentColor; }
+.pill.red { color: var(--red); } .pill.amber { color: var(--amber); } .pill.muted { color: var(--muted); }
+.share { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 24px 22px; }
+.share button { padding: 10px 16px; font-size: 13px; }
+
+.wallsec { display: grid; gap: 10px; border: 2px solid var(--ink); border-radius: 10px; padding: 20px 24px; background: var(--card); }
+.wallsec h2 { font: 400 clamp(32px, 6vw, 48px)/1 var(--display); text-transform: uppercase; margin: 0; color: var(--red); }
+.wallsec .lede { font-size: 15px; }
+.empty { margin: 0; color: var(--muted); font-size: 14px; }
+.how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.how div { border-top: 3px solid var(--ink); padding-top: 10px; }
+.how b { font: 400 22px var(--display); text-transform: uppercase; display: block; }
+.how p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 640px) {
+  .report-top { grid-template-columns: 1fr; justify-items: start; }
+  .grade { width: 104px; font-size: 68px; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat:nth-child(2) { border-right: 0; }
+  .stat:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .how { grid-template-columns: 1fr; }
+  .v { grid-template-columns: 1fr; gap: 2px; }
+  .v code { justify-self: start; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .report { animation: slam .35s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes slam { from { transform: scale(.96) rotate(-1deg); opacity: .4; } }
+}
+</style>
+</head>
+<body>
+<div class="tape" aria-hidden="true"></div>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Solana launch inspection · pump.fun · letsbonk · any SPL</div>
+    <h1>Is it <span>Diddy bundled?</span></h1>
+    <p class="lede">Paste the CA. We pull the launch block straight off the chain and check who was already in the room when the coin was born.</p>
+  </header>
+
+  <section style="display:grid;gap:10px">
+    <form id="f">
+      <input id="ca" type="text" placeholder="Paste contract address (CA)" autocomplete="off" spellcheck="false" aria-label="Contract address">
+      <button id="go" type="submit">Inspect</button>
+    </form>
+    <div class="under">
+      <details>
+        <summary>Slow or getting rate limited? Use your own RPC</summary>
+        <div class="rpcrow">
+          <input id="rpc" type="text" placeholder="https://mainnet.helius-rpc.com/?api-key=..." spellcheck="false" aria-label="Custom RPC URL">
+          <button class="linkish" type="button" id="saveRpc">Save</button>
+        </div>
+        <p style="margin:6px 0 0">Free keys from Helius or QuickNode work. Saved only in your browser.</p>
+      </details>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+  </section>
+
+  <div id="out"></div>
+
+  <section class="wallsec" aria-labelledby="wallh">
+    <h2 id="wallh">Wall of shame</h2>
+    <p class="lede">Wallets caught buying in the launch block of coins checked here. Every receipt links to the transaction on Solscan, so you can see it for yourself.</p>
+    <div id="wall"><p class="empty">Loading the wall…</p></div>
+  </section>
+
+  <section class="how" aria-label="What we check">
+    <div><b>Launch block</b><p>Wallets that bought in the exact same block the token was created. Normal people physically can't do that.</p></div>
+    <div><b>Jito tips</b><p>Early buys that paid a Jito tip so they'd land together with the launch. Classic bundle tell.</p></div>
+    <div><b>Still holding</b><p>How much of the supply those early wallets are still sitting on, waiting for you.</p></div>
+  </section>
+
+  <footer>Not financial advice. Reads public on-chain data and can miss bundlers who spread buys across many blocks or wallets. A clean grade means "not obviously bundled," not "safe." It's a memecoin.</footer>
+</div>
+
+<script>
+const JITO_TIPS = new Set([
+  "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5","HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
+  "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY","ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+  "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh","ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
+  "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL","3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"
+]);
+const PUBLIC_RPC = "/api/rpc"; // our own proxy (api/rpc.js on Vercel, serve.py locally)
+const EARLY_TX = 60;      // how many of the first transactions we inspect
+const EARLY_SLOTS = 3;    // "sniper" window after launch block
+
+const $ = id => document.getElementById(id);
+let rpcUrl = PUBLIC_RPC;
+try { rpcUrl = localStorage.getItem("rpc") || PUBLIC_RPC; } catch {}
+if (rpcUrl !== PUBLIC_RPC) $("rpc").value = rpcUrl;
+const isPublic = () => rpcUrl === PUBLIC_RPC;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let lastCall = 0;
+async function rpc(method, params) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const gap = isPublic() ? 250 : 25;
+    const wait = lastCall + gap - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastCall = Date.now();
+    let res;
+    try {
+      res = await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+    } catch (e) { await sleep(800 * (attempt + 1)); continue; }
+    if (res.status === 429) { setStatus(`Free RPC is rate limiting us, waiting… (${attempt + 1})`); await sleep(Math.min(10000, 1500 * 2 ** attempt)); continue; }
+    const j = await res.json();
+    if (j.error) throw new Error(j.error.message || "RPC error");
+    return j.result;
+  }
+  throw new Error("The free Solana RPC is overloaded right now. Try again in a minute, or add your own RPC below.");
+}
+
+function setStatus(t, err) { const s = $("status"); s.textContent = t; s.className = "status" + (err ? " err" : ""); }
+const short = a => a.slice(0, 4) + "…" + a.slice(-4);
+const pct = (n, d = 1) => (n >= 10 ? n.toFixed(0) : n.toFixed(d)) + "%";
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = n => n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + n.toFixed(0);
+
+async function dex(mint) {
+  try {
+    const r = await fetch("https://api.dexscreener.com/latest/dex/tokens/" + mint);
+    const j = await r.json();
+    const pairs = (j.pairs || []).filter(p => p.baseToken?.address === mint);
+    pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0));
+    return pairs[0] || null;
+  } catch { return null; }
+}
+
+// Any signature from a given slot (skipped slots have no block, so walk forward).
+async function sigAt(slot) {
+  for (let s = slot; s < slot + 30; s++) {
+    const b = await rpc("getBlock", [s, { transactionDetails: "signatures", rewards: false, maxSupportedTransactionVersion: 1 }])
+      .catch(e => { if (/overloaded/.test(e.message)) throw e; return null; }); // skipped slot → try the next one
+    if (b?.signatures?.length) return b.signatures[0];
+  }
+  throw new Error("Couldn't read blocks from the RPC. Try again in a minute.");
+}
+
+// Returns the token's oldest signatures, newest-first like the RPC does.
+// Small coins: just page back. Busy coins: binary-search the slot of the first
+// activity (getSignaturesForAddress accepts any signature as `before`), then read that window.
+async function launchWindow(mint) {
+  let before, collected = [];
+  for (let page = 1; page <= 3; page++) {
+    setStatus(`Rewinding to launch… page ${page}`);
+    const opts = { limit: 1000 }; if (before) opts.before = before;
+    const batch = await rpc("getSignaturesForAddress", [mint, opts]);
+    collected = collected.slice(-EARLY_TX).concat(batch);
+    if (batch.length < 1000) return collected;
+    before = batch[batch.length - 1].signature;
+  }
+  const hasBefore = async slot => (await rpc("getSignaturesForAddress", [mint, { before: await sigAt(slot), limit: 1 }])).length > 0;
+  let hi = collected[collected.length - 1].slot, step = 50000, lo = hi - step, n = 0;
+  setStatus("Busy coin. Hunting for the launch block…");
+  while (await hasBefore(lo)) { hi = lo; step *= 2; lo = hi - step; }
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    setStatus(`Busy coin. Hunting for the launch block… narrowing (${++n})`);
+    if (await hasBefore(mid)) hi = mid; else lo = mid;
+  }
+  return rpc("getSignaturesForAddress", [mint, { before: await sigAt(hi + EARLY_SLOTS + 3), limit: 1000 }]);
+}
+
+async function inspect(mint) {
+  const [pair, supplyRes] = await Promise.all([dex(mint), rpc("getTokenSupply", [mint]).catch(() => null)]);
+  if (!supplyRes) throw new Error("That doesn't look like a Solana token. Double-check the CA.");
+  const decimals = supplyRes.value.decimals;
+  const supply = Number(supplyRes.value.amount);
+
+  const oldestPage = await launchWindow(mint);
+  if (!oldestPage.length) throw new Error("No transactions found for this CA.");
+
+  // Read the launch block and the next few whole (4 calls), keeping only txs that touch this mint.
+  // Block order is execution order, so the first one is the create.
+  const firstSlot = Math.min(...oldestPage.map(s => s.slot));
+  const touches = tx => !tx.meta?.err && [...(tx.meta?.preTokenBalances || []), ...(tx.meta?.postTokenBalances || [])].some(b => b.mint === mint);
+  let txs = [];
+  for (let k = 0; k <= EARLY_SLOTS; k++) {
+    setStatus(`Reading launch blocks… ${k + 1}/${EARLY_SLOTS + 1}`);
+    const block = await rpc("getBlock", [firstSlot + k, { transactionDetails: "accounts", rewards: false, maxSupportedTransactionVersion: 1 }])
+      .catch(e => { if (/overloaded/.test(e.message)) throw e; return null; });
+    for (const tx of block?.transactions || []) if (touches(tx)) txs.push({ ...tx, slot: firstSlot + k, blockTime: block.blockTime });
+  }
+  if (!txs.length) {
+    // Fallback: fetch the earliest transactions one by one.
+    const early = oldestPage.slice().reverse().filter(s => !s.err).slice(0, EARLY_TX);
+    for (let i = 0; i < early.length; i++) {
+      setStatus(`Reading launch transactions… ${i + 1}/${early.length}`);
+      const tx = await rpc("getTransaction", [early[i].signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 1 }]).catch(() => null);
+      if (tx) txs.push(tx);
+    }
+    txs.sort((a, b) => a.slot - b.slot);
+  }
+  if (!txs.length) throw new Error("Couldn't read the launch transactions. Try again in a minute.");
+
+  const launchSlot = txs[0].slot;
+  const keysOf = tx => (tx.transaction.message?.accountKeys || tx.transaction.accountKeys).map(k => typeof k === "string" ? { pubkey: k } : k);
+  const devWallet = keysOf(txs[0])[0].pubkey;
+
+  const wallets = new Map(); // owner -> info
+  for (const tx of txs) {
+    const keys = keysOf(tx);
+    const signers = new Set(keys.filter(k => k.signer).map(k => k.pubkey));
+    const jito = keys.some(k => JITO_TIPS.has(k.pubkey));
+    const delta = new Map();
+    for (const b of tx.meta.preTokenBalances || []) if (b.mint === mint) delta.set(b.owner, (delta.get(b.owner) || 0) - Number(b.uiTokenAmount.amount));
+    for (const b of tx.meta.postTokenBalances || []) if (b.mint === mint) delta.set(b.owner, (delta.get(b.owner) || 0) + Number(b.uiTokenAmount.amount));
+    for (const [owner, d] of delta) {
+      if (d <= 0 || !signers.has(owner)) continue;
+      const idx = keys.findIndex(k => k.pubkey === owner);
+      const solSpent = idx >= 0 ? (tx.meta.preBalances[idx] - tx.meta.postBalances[idx]) / 1e9 : 0;
+      const w = wallets.get(owner) || { owner, tokens: 0, sol: 0, firstSlot: tx.slot, jito: false, sig: tx.transaction.signatures[0] };
+      w.tokens += d; w.sol += Math.max(0, solSpent); w.jito = w.jito || jito;
+      w.firstSlot = Math.min(w.firstSlot, tx.slot);
+      wallets.set(owner, w);
+    }
+  }
+
+  const list = [...wallets.values()].sort((a, b) => a.firstSlot - b.firstSlot || b.tokens - a.tokens);
+  const dev = wallets.get(devWallet);
+  const sameBlock = list.filter(w => w.owner !== devWallet && w.firstSlot === launchSlot);
+  const snipers = list.filter(w => w.owner !== devWallet && w.firstSlot > launchSlot && w.firstSlot <= launchSlot + EARLY_SLOTS);
+  const jitoWallets = list.filter(w => w.firstSlot <= launchSlot + EARLY_SLOTS && w.jito);
+
+  // Who still holds: map top token accounts to owners.
+  setStatus("Checking who's still holding…");
+  const holding = new Map();
+  try {
+    const largest = await rpc("getTokenLargestAccounts", [mint]);
+    const accts = largest.value.map(v => v.address);
+    const info = await rpc("getMultipleAccounts", [accts, { encoding: "jsonParsed" }]);
+    info.value.forEach((a, i) => {
+      const owner = a?.data?.parsed?.info?.owner;
+      if (owner) holding.set(owner, (holding.get(owner) || 0) + Number(largest.value[i].amount));
+    });
+  } catch {}
+  const suspects = [dev, ...sameBlock, ...snipers].filter(Boolean);
+  const stillHeldPct = suspects.reduce((s, w) => s + (holding.get(w.owner) || 0), 0) / supply * 100;
+  for (const w of list) w.holdPct = holding.has(w.owner) ? holding.get(w.owner) / supply * 100 : null;
+
+  const share = ws => ws.reduce((s, w) => s + w.tokens, 0) / supply * 100;
+  return {
+    mint, pair, supply, decimals, launchSlot, devWallet, createSig: txs[0].transaction.signatures[0], rap: {},
+    launchTime: txs[0].blockTime, list, dev,
+    devPct: dev ? share([dev]) : 0,
+    sameBlock, sameBlockPct: share(sameBlock),
+    snipers, sniperPct: share(snipers),
+    jitoWallets, stillHeldPct, holdingKnown: holding.size > 0
+  };
+}
+
+function grade(r) {
+  const v = [];
+  if (r.sameBlock.length >= 3 || r.sameBlockPct >= 10) v.push(["bad", "BUNDLE", `${r.sameBlock.length} wallet${r.sameBlock.length === 1 ? "" : "s"} bought ${pct(r.sameBlockPct)} of supply in the same block as launch.`]);
+  else if (r.sameBlock.length >= 1) v.push(["warn", "BUNDLE", `${r.sameBlock.length} wallet${r.sameBlock.length === 1 ? "" : "s"} bought in the launch block (${pct(r.sameBlockPct)} of supply).`]);
+  else v.push(["ok", "BUNDLE", "Nobody but the dev bought in the launch block."]);
+
+  const repeat = Object.keys(r.rap);
+  if (repeat.length) v.push(["bad", "REPEAT", `${repeat.length} wallet${repeat.length === 1 ? " in this launch was" : "s in this launch were"} already caught bundling ${repeat.length === 1 ? "another chart" : "other charts"}. See the rap sheet below.`]);
+
+  if (r.jitoWallets.length >= 2) v.push(["bad", "JITO", `${r.jitoWallets.length} early wallets paid Jito tips to land their buys right at launch.`]);
+  else if (r.jitoWallets.length === 1) v.push(["warn", "JITO", "One early wallet paid a Jito tip at launch."]);
+
+  if (r.sniperPct >= 15 || r.snipers.length >= 8) v.push(["warn", "SNIPERS", `${r.snipers.length} wallets grabbed ${pct(r.sniperPct)} within ${EARLY_SLOTS} blocks of launch.`]);
+  if (r.devPct >= 10) v.push(["warn", "DEV BAG", `Dev bought ${pct(r.devPct)} of supply at launch.`]);
+
+  if (r.holdingKnown) {
+    if (r.stillHeldPct >= 20) v.push(["bad", "HOLDING", `Dev + early wallets still hold ${pct(r.stillHeldPct)} of supply. That's the bag waiting for you.`]);
+    else if (r.stillHeldPct >= 7) v.push(["warn", "HOLDING", `Dev + early wallets still hold ${pct(r.stillHeldPct)} of supply.`]);
+    else v.push(["ok", "HOLDING", `Dev + early wallets hold ${pct(r.stillHeldPct)} of supply now.`]);
+  }
+
+  const bad = v.filter(x => x[0] === "bad").length, warn = v.filter(x => x[0] === "warn").length;
+  const g = bad ? "F" : warn >= 2 ? "C" : warn === 1 ? "B" : "A";
+  const copy = {
+    A: ["Passed inspection", "No bundle in the launch block. Could still rug, it's a memecoin, but they didn't pre-load the truck."],
+    B: ["Smells a little", "No obvious bundle, but something's off. Wear gloves."],
+    C: ["Sus", "Multiple red flags around launch. Somebody knew this was coming before you did."],
+    F: ["Bundled", "Wallets were already loaded the second this coin was born. You are the exit liquidity. Close the tab."]
+  }[g];
+  return { g, title: copy[0], blurb: copy[1], v };
+}
+
+function render(r) {
+  const G = grade(r);
+  const p = r.pair;
+  const name = p ? `${esc(p.baseToken.name)} <span style="color:var(--muted);font-weight:600">$${esc(p.baseToken.symbol)}</span>` : "Unknown token";
+  const img = p?.info?.imageUrl ? `<img src="${esc(p.info.imageUrl)}" alt="">` : "";
+  const age = r.launchTime ? ago(r.launchTime) : "—";
+  const rows = r.list.slice(0, 25).map(w => {
+    const off = w.firstSlot - r.launchSlot;
+    const tag = w.owner === r.devWallet ? `<span class="pill muted">dev</span>` : off === 0 ? `<span class="pill red">same block</span>` : off <= EARLY_SLOTS ? `<span class="pill amber">sniper</span>` : "";
+    return `<tr><td><a href="https://solscan.io/account/${w.owner}" target="_blank" rel="noopener">${short(w.owner)}</a> ${tag}</td>
+      <td>+${off}</td><td>${pct(w.tokens / r.supply * 100, 2)}</td><td>${w.sol.toFixed(2)}</td>
+      <td>${w.jito ? "yes" : ""}</td><td>${w.holdPct == null ? '<span style="color:var(--muted)">not top 20</span>' : pct(w.holdPct, 2)}</td>
+      <td>${rapSheet(r.rap[w.owner])}</td></tr>`;
+  }).join("");
+  $("out").innerHTML = `
+  <article class="report" aria-label="Inspection result">
+    <div class="report-top">
+      <div class="grade g-${G.g}" aria-label="Grade ${G.g}">${G.g}<small>GRADE</small></div>
+      <div class="verdict">
+        <div class="tok">${img}<b>${name}</b></div>
+        <div class="tok"><code>${esc(r.mint)}</code></div>
+        <h2 class="g-${G.g}">${G.title}</h2>
+        <p>${G.blurb}</p>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><span>Launch block buyers</span><b>${r.sameBlock.length}</b></div>
+      <div class="stat"><span>Bundled supply</span><b>${pct(r.sameBlockPct)}</b></div>
+      <div class="stat"><span>Early wallets hold</span><b>${r.holdingKnown ? pct(r.stillHeldPct) : "—"}</b></div>
+      <div class="stat"><span>MC · age</span><b>${money(p?.marketCap ?? p?.fdv)} · ${age}</b></div>
+    </div>
+    <div class="violations"><h3>Inspection notes</h3>
+      ${G.v.map(([k, c, t]) => `<div class="v ${k}"><code>${c}</code><span>${t}</span></div>`).join("")}
+    </div>
+    <div class="evidence"><h3>Earliest buyers</h3>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Wallet</th><th>Blocks after launch</th><th>Bought</th><th>SOL spent</th><th>Jito tip</th><th>Holds now</th><th>Rap sheet</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7">No buys found in the first transactions.</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div class="share">
+      <button type="button" id="copyRes">Copy result</button>
+      ${p?.url ? `<a class="linkish" style="align-self:center" href="${esc(p.url)}" target="_blank" rel="noopener">Open chart on DexScreener</a>` : ""}
+    </div>
+  </article>`;
+  $("copyRes").onclick = async () => {
+    const sym = p ? "$" + p.baseToken.symbol : short(r.mint);
+    const text = `${sym} bundle check: grade ${G.g} (${G.title}). ${r.sameBlock.length} wallets bought ${pct(r.sameBlockPct)} in the launch block, early wallets still hold ${r.holdingKnown ? pct(r.stillHeldPct) : "?"}.`;
+    try { await navigator.clipboard.writeText(text); $("copyRes").textContent = "Copied"; }
+    catch { setStatus(text); }
+  };
+}
+
+// coins = {mint: {sym, sig, t}} — every entry links to the launch-block buy that got the wallet caught.
+function rapSheet(coins, max = 4) {
+  const list = Object.entries(coins || {}).sort((a, b) => b[1].t - a[1].t);
+  if (!list.length) return "";
+  const links = list.slice(0, max).map(([mint, c]) =>
+    `<a href="https://solscan.io/tx/${esc(c.sig)}" target="_blank" rel="noopener" title="${esc(mint)}">${c.sym ? "$" + esc(c.sym) : short(mint)}</a>`).join(", ");
+  return `<span class="pill red">caught ${list.length}×</span> ${links}${list.length > max ? ` +${list.length - max}` : ""}`;
+}
+
+// Report this launch's same-block buyers (the server re-verifies on-chain), then pull rap sheets.
+async function shameSync(r) {
+  const offenders = r.sameBlock.map(w => ({ wallet: w.owner, sig: w.sig }));
+  if (offenders.length) {
+    await fetch("/api/shame", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mint: r.mint, symbol: r.pair?.baseToken?.symbol || "", createSig: r.createSig, buys: offenders }) }).catch(() => {});
+  }
+  try {
+    const ids = r.list.slice(0, 50).map(w => w.owner).join(",");
+    const sheets = await (await fetch("/api/shame?wallets=" + ids)).json();
+    for (const [w, coins] of Object.entries(sheets)) {
+      delete coins[r.mint];                       // only other charts count
+      if (Object.keys(coins).length) r.rap[w] = coins;
+    }
+  } catch {}
+}
+
+async function loadWall() {
+  let rows = [];
+  try { rows = await (await fetch("/api/shame")).json(); } catch {}
+  $("wall").innerHTML = Array.isArray(rows) && rows.length
+    ? `<div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Charts bundled</th><th>Receipts</th></tr></thead><tbody>${
+        rows.map(x => `<tr><td><a href="https://solscan.io/account/${esc(x.wallet)}" target="_blank" rel="noopener">${short(x.wallet)}</a></td>
+          <td>${x.count}</td><td>${rapSheet(x.coins, 6)}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="empty">Nobody's been caught yet. Check a CA and any wallet that bought in the launch block lands here.</p>`;
+}
+
+function ago(t) {
+  const s = Date.now() / 1000 - t;
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + "m";
+  if (s < 86400) return Math.round(s / 3600) + "h";
+  return Math.round(s / 86400) + "d";
+}
+
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const mint = $("ca").value.trim();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) { setStatus("That's not a Solana CA. It should be 32–44 letters and numbers.", true); return; }
+  $("go").disabled = true;
+  try {
+    const r = await inspect(mint);
+    setStatus("Checking rap sheets…");
+    await shameSync(r);
+    render(r); setStatus("");
+    loadWall();
+    history.replaceState(null, "", "#" + mint);
+  } catch (err) { setStatus(err.message, true); }
+  finally { $("go").disabled = false; }
+});
+$("saveRpc").onclick = () => {
+  rpcUrl = $("rpc").value.trim() || PUBLIC_RPC;
+  try { localStorage.setItem("rpc", rpcUrl === PUBLIC_RPC ? "" : rpcUrl); } catch {}
+  setStatus(isPublic() ? "Using the free public RPC." : "Saved. Using your RPC.");
+};
+loadWall();
+const fromHash = location.hash.slice(1);
+if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(fromHash)) { $("ca").value = fromHash; $("f").requestSubmit(); }
+</script>
+</body>
+</html>
