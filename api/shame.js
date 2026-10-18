@@ -3,14 +3,18 @@
 //   GET  /api/shame?wallets=a,b,c   -> rap sheet for those wallets
 //   POST /api/shame {mint, symbol, createSig, buys:[{wallet, sig}]}
 // Every POSTed buy is re-checked on-chain before it is saved, so nobody can frame a wallet.
-// Env: RPC_URL, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN (Vercel → Storage → Upstash Redis).
+// Env: RPC_URL, plus KV_REST_API_URL/TOKEN or UPSTASH_REDIS_REST_URL/TOKEN (Vercel → Storage → Upstash Redis).
 const RPC_URL = process.env.RPC_URL || "https://api.mainnet-beta.solana.com";
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,88}$/;
 
+// Vercel's Upstash integration names these KV_REST_API_*; a direct Upstash setup uses UPSTASH_REDIS_REST_*.
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+
 async function redis(cmds) {
-  const r = await fetch(process.env.UPSTASH_REDIS_REST_URL + "/pipeline", {
+  const r = await fetch(REDIS_URL + "/pipeline", {
     method: "POST",
-    headers: { authorization: "Bearer " + process.env.UPSTASH_REDIS_REST_TOKEN, "content-type": "application/json" },
+    headers: { authorization: "Bearer " + REDIS_TOKEN, "content-type": "application/json" },
     body: JSON.stringify(cmds),
   });
   return (await r.json()).map(x => x.result);
