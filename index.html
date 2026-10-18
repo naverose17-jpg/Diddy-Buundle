@@ -326,9 +326,12 @@ async function inspect(mint) {
     const keys = keysOf(tx);
     const signers = new Set(keys.filter(k => k.signer).map(k => k.pubkey));
     const jito = keys.some(k => JITO_TIPS.has(k.pubkey));
-    const delta = new Map();
+    const delta = new Map(), tokenAcct = new Map();
     for (const b of tx.meta.preTokenBalances || []) if (b.mint === mint) delta.set(b.owner, (delta.get(b.owner) || 0) - Number(b.uiTokenAmount.amount));
-    for (const b of tx.meta.postTokenBalances || []) if (b.mint === mint) delta.set(b.owner, (delta.get(b.owner) || 0) + Number(b.uiTokenAmount.amount));
+    for (const b of tx.meta.postTokenBalances || []) if (b.mint === mint) {
+      delta.set(b.owner, (delta.get(b.owner) || 0) + Number(b.uiTokenAmount.amount));
+      tokenAcct.set(b.owner, keys[b.accountIndex]?.pubkey);
+    }
     for (const [owner, d] of delta) {
       if (d <= 0 || !signers.has(owner)) continue;
       const idx = keys.findIndex(k => k.pubkey === owner);
@@ -336,6 +339,7 @@ async function inspect(mint) {
       const w = wallets.get(owner) || { owner, tokens: 0, sol: 0, firstSlot: tx.slot, jito: false, sig: tx.transaction.signatures[0] };
       w.tokens += d; w.sol += Math.max(0, solSpent); w.jito = w.jito || jito;
       w.firstSlot = Math.min(w.firstSlot, tx.slot);
+      w.tokenAccount = w.tokenAccount || tokenAcct.get(owner);
       wallets.set(owner, w);
     }
   }
@@ -346,17 +350,13 @@ async function inspect(mint) {
   const snipers = list.filter(w => w.owner !== devWallet && w.firstSlot > launchSlot && w.firstSlot <= launchSlot + EARLY_SLOTS);
   const jitoWallets = list.filter(w => w.firstSlot <= launchSlot + EARLY_SLOTS && w.jito);
 
-  // Who still holds: map top token accounts to owners.
+  // Who still holds: read the current balance of the token account each early wallet bought into (one call).
   setStatus("Checking who's still holding…");
   const holding = new Map();
   try {
-    const largest = await rpc("getTokenLargestAccounts", [mint]);
-    const accts = largest.value.map(v => v.address);
-    const info = await rpc("getMultipleAccounts", [accts, { encoding: "jsonParsed" }]);
-    info.value.forEach((a, i) => {
-      const owner = a?.data?.parsed?.info?.owner;
-      if (owner) holding.set(owner, (holding.get(owner) || 0) + Number(largest.value[i].amount));
-    });
+    const tracked = list.filter(w => w.tokenAccount).slice(0, 100);
+    const info = await rpc("getMultipleAccounts", [tracked.map(w => w.tokenAccount), { encoding: "jsonParsed" }]);
+    info.value.forEach((a, i) => holding.set(tracked[i].owner, Number(a?.data?.parsed?.info?.tokenAmount?.amount || 0)));
   } catch {}
   const suspects = [dev, ...sameBlock, ...snipers].filter(Boolean);
   const stillHeldPct = suspects.reduce((s, w) => s + (holding.get(w.owner) || 0), 0) / supply * 100;
@@ -416,7 +416,7 @@ function render(r) {
     const tag = w.owner === r.devWallet ? `<span class="pill muted">dev</span>` : off === 0 ? `<span class="pill red">same block</span>` : off <= EARLY_SLOTS ? `<span class="pill amber">sniper</span>` : "";
     return `<tr><td><a href="https://solscan.io/account/${w.owner}" target="_blank" rel="noopener">${short(w.owner)}</a> ${tag}</td>
       <td>+${off}</td><td>${pct(w.tokens / r.supply * 100, 2)}</td><td>${w.sol.toFixed(2)}</td>
-      <td>${w.jito ? "yes" : ""}</td><td>${w.holdPct == null ? '<span style="color:var(--muted)">not top 20</span>' : pct(w.holdPct, 2)}</td>
+      <td>${w.jito ? "yes" : ""}</td><td>${w.holdPct == null ? '<span style="color:var(--muted)">—</span>' : pct(w.holdPct, 2)}</td>
       <td>${rapSheet(r.rap[w.owner])}</td></tr>`;
   }).join("");
   $("out").innerHTML = `
@@ -486,7 +486,7 @@ async function shameSync(r) {
 
 async function loadWall() {
   let rows = [];
-  try { rows = await (await fetch("/api/shame")).json(); } catch {}
+  try { rows = await (await fetch("/api/shame?t=" + Date.now())).json(); } catch {}
   $("wall").innerHTML = Array.isArray(rows) && rows.length
     ? `<div class="tablewrap"><table><thead><tr><th>Wallet</th><th>Charts bundled</th><th>Receipts</th></tr></thead><tbody>${
         rows.map(x => `<tr><td><a href="https://solscan.io/account/${esc(x.wallet)}" target="_blank" rel="noopener">${short(x.wallet)}</a></td>
